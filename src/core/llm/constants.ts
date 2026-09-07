@@ -1,6 +1,6 @@
 export const DEFAULT_MODELS = {
   text: 'gemini-3-flash-preview',
-  image: 'gemini-3.1-flash-image-preview',
+  image: 'z-image-turbo',
   music: 'lyria-3-clip-preview',
   video: 'veo-3.1-lite-generate-preview'
 } as const;
@@ -12,9 +12,7 @@ export const AVAILABLE_MODELS = {
     'gemini-3.1-flash-lite-preview'
   ],
   image: [
-    'gemini-3.1-flash-image-preview',
-    'gemini-3-pro-image-preview',
-    'gemini-2.5-flash-image'
+    'z-image-turbo'
   ],
   music: [
     'lyria-3-clip-preview',

@@ -14,10 +14,8 @@ export const GEMINI_PRICING: Record<string, ModelPricing> = {
   'gemini-3.1-pro-preview': { inputPer1M: 2.00, outputPer1M: 12.00 },
   'gemini-3.1-flash-lite-preview': { inputPer1M: 0.25, outputPer1M: 1.50 },
   
-  // Image Models
-  [DEFAULT_MODELS.image]: { perImage: 0.067 },
-  'gemini-3-pro-image-preview': { perImage: 0.134 },
-  'gemini-2.5-flash-image': { perImage: 0.039 },
+  // Image Models (local ComfyUI / Z-Image Turbo — no API cost)
+  [DEFAULT_MODELS.image]: { perImage: 0 },
   
   // Music Models
   [DEFAULT_MODELS.music]: { perSong: 0.040 },

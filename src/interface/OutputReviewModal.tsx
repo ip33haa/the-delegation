@@ -152,7 +152,9 @@ export function OutputReviewModal() {
       <div className="space-y-2">
         <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 flex items-center gap-1.5">
           <Sparkles size={12} /> Generation Model
-          <InfoBubble text="Select the specific Gemini model used for the final generation. Flash models are faster, Pro models are more capable." />
+          <InfoBubble text={activeTeam.outputType === 'image'
+            ? 'Local Z-Image Turbo via ComfyUI (no Gemini image API). Keep ComfyUI running on port 8188.'
+            : 'Select the specific Gemini model used for the final generation. Flash models are faster, Pro models are more capable.'} />
         </label>
         <select
           value={params.model || activeTeam.outputModel}

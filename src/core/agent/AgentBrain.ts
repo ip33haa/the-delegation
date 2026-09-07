@@ -1,5 +1,6 @@
 import { LLMMessage } from '../llm/types';
 import { GeminiProvider } from '../llm/providers/GeminiProvider';
+import { generateImage as generateLocalImage } from '../llm/providers/ComfyUIImageProvider';
 import { useUiStore } from '../../integration/store/uiStore';
 import { useCoreStore } from '../../integration/store/coreStore';
 import { useTeamStore } from '../../integration/store/teamStore';
@@ -235,9 +236,10 @@ export class AgentBrain {
 
     try {
       const llmConfig = useUiStore.getState().llmConfig;
-      if (!llmConfig.apiKey) throw new Error('Gemini API key is required');
-      const provider = new GeminiProvider(llmConfig.apiKey) as any;
       const model = options.model || activeTeam.outputModel || llmConfig.model;
+      const isLocalImage = activeTeam.outputType === 'image';
+      if (!isLocalImage && !llmConfig.apiKey) throw new Error('Gemini API key is required');
+      const provider = llmConfig.apiKey ? new GeminiProvider(llmConfig.apiKey) as any : null;
 
       core.addLogEntry({
         agentIndex: -1,
@@ -249,19 +251,19 @@ export class AgentBrain {
       let usage: any = undefined;
 
       if (activeTeam.outputType === 'image') {
-        const result = await provider.generateImage(prompt, model, (msg: string) => {
+        const result = await generateLocalImage(prompt, model, (msg: string) => {
           console.log(`[System:Image] ${msg}`);
-        }, options, core.referenceImages);
+        }, options);
         assetContent = result.data || '';
         usage = result.usage;
       } else if (activeTeam.outputType === 'music') {
-        const result = await provider.generateAudio(prompt, model, (msg: string) => {
+        const result = await provider!.generateAudio(prompt, model, (msg: string) => {
           console.log(`[System:Audio] ${msg}`);
         });
         assetContent = result.data || '';
         usage = result.usage;
       } else if (activeTeam.outputType === 'video') {
-        const result = await provider.generateVideo(prompt, model, (msg: string) => {
+        const result = await provider!.generateVideo(prompt, model, (msg: string) => {
           console.log(`[System:Video] ${msg}`);
         }, options, core.referenceImages);
         assetContent = result.videoUrl || '';
@@ -292,7 +294,9 @@ export class AgentBrain {
       console.error('[AgentBrain] Final asset generation failed:', error);
       core.setIsGeneratingAsset(false);
       const errMsg = error instanceof Error ? error.message : String(error);
-      useUiStore.getState().setBYOKOpen(true, errMsg);
+      if (!errMsg.toLowerCase().includes('comfyui')) {
+        useUiStore.getState().setBYOKOpen(true, errMsg);
+      }
       core.addLogEntry({
         agentIndex: 0,
         action: `Error generating final ${activeTeam.outputType}: ${errMsg}`,
