@@ -1,9 +1,10 @@
-
 import * as THREE from 'three/webgpu';
 
 export class Engine {
   public renderer: THREE.WebGPURenderer;
   public timer: THREE.Timer;
+  /** True when the live backend is WebGPU (not the WebGL2 fallback). */
+  public isWebGPU = false;
 
   constructor(container: HTMLElement) {
     this.renderer = new THREE.WebGPURenderer({ antialias: true });
@@ -25,8 +26,19 @@ export class Engine {
   public async init() {
     try {
       await this.renderer.init();
+      const backend = (this.renderer as any).backend;
+      this.isWebGPU = !!backend?.isWebGPUBackend;
+
+      if (!this.isWebGPU) {
+        console.warn(
+          '[Engine] WebGPU unavailable — WebGL2 fallback. Characters use CPU movement + bind-pose (no storage shaders). Enable WebGPU in Chrome/Edge for full animation.'
+        );
+      } else {
+        console.info('[Engine] WebGPU backend ready.');
+      }
     } catch (e) {
-      console.error("WebGPU initialization failed:", e);
+      console.error('WebGPU initialization failed:', e);
+      this.isWebGPU = false;
     }
   }
 

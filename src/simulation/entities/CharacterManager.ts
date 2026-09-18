@@ -20,6 +20,9 @@ export class CharacterManager {
   private instanceCount = getAllAgents(getActiveAgentSet()).length + 1;
   private poiManager: PoiManager | null = null;
 
+  /** When false, use InstancedBufferAttributes + CPU movement (WebGL2 fallback). */
+  private useWebGPU = true;
+
   // Compute Buffers (GPU)
   private posAttribute: THREE.StorageInstancedBufferAttribute | null = null;
   private velAttribute: THREE.StorageInstancedBufferAttribute | null = null;
@@ -27,6 +30,12 @@ export class CharacterManager {
   private accessoryAttribute: THREE.InstancedBufferAttribute | null = null;
   private positionStorage: any;
   private velocityStorage: any;
+
+  // WebGL-safe instance attributes (no storage() in shaders)
+  private instancePosAttr: THREE.InstancedBufferAttribute | null = null;
+  private instanceFacingAttr: THREE.InstancedBufferAttribute | null = null;
+  private instanceAlphaAttr: THREE.InstancedBufferAttribute | null = null;
+  private expressionAttr: THREE.InstancedBufferAttribute | null = null;
 
   // Agent state buffer (CPU+GPU): waypoint + behavior state per instance
   private agentStateBuffer: AgentStateBuffer | null = null;
@@ -61,6 +70,11 @@ export class CharacterManager {
   public isLoaded = false;
 
   constructor(private scene: THREE.Scene) { }
+
+  /** Call after Engine.init() — WebGL cannot compile storage()/compute character shaders. */
+  public setUseWebGPU(enabled: boolean) {
+    this.useWebGPU = enabled;
+  }
 
   public setPoiManager(poiManager: PoiManager) {
     this.poiManager = poiManager;
@@ -144,7 +158,9 @@ export class CharacterManager {
         seek += data.length;
       }
 
-      this.bakedAnimationsBuffer = new THREE.StorageBufferAttribute(combinedData, 16);
+      // itemSize 4 (not 16): WebGL fallback cannot wrap mat4 strides; storage() still
+      // indexes as mat4 via the explicit type + matrix count below.
+      this.bakedAnimationsBuffer = new THREE.StorageBufferAttribute(combinedData, 4);
       this.metaBuffer = new THREE.StorageBufferAttribute(metaArray, 4);
 
       this.initInstances();
@@ -170,10 +186,13 @@ export class CharacterManager {
    */
   public async syncFromGPU(renderer: any): Promise<Float32Array | null> {
     if (!this.posAttribute) return null;
+    if (!this.useWebGPU) {
+      // CPU is authoritative on WebGL fallback.
+      return this.debugPosArray;
+    }
     try {
       const buffer = await renderer.getArrayBufferAsync(this.posAttribute);
       this.debugPosArray = new Float32Array(buffer);
-      // Keep the CPU-side attribute array in sync so setPosition doesn't upload stale data
       (this.posAttribute.array as Float32Array).set(this.debugPosArray);
     } catch {
       // WebGPU readback not available – fall back to stale data
@@ -188,6 +207,13 @@ export class CharacterManager {
     if (this.expressionBuffer) {
       this.expressionBuffer.update(delta);
     }
+
+    if (!this.useWebGPU) {
+      this.simulateMovementCPU(delta);
+      this.syncWebGLInstanceAttrs();
+      return;
+    }
+
     if (this.computeNode) {
       renderer.compute(this.computeNode);
     }
@@ -200,6 +226,10 @@ export class CharacterManager {
     this.instancedMeshes = [];
     this.computeNode = null;
     this.expressionBuffer = null;
+    this.instancePosAttr = null;
+    this.instanceFacingAttr = null;
+    this.instanceAlphaAttr = null;
+    this.expressionAttr = null;
   }
 
   private initInstances() {
@@ -271,8 +301,26 @@ export class CharacterManager {
     this.colorAttribute = new THREE.InstancedBufferAttribute(colorArray, 3);
     this.accessoryAttribute = new THREE.InstancedBufferAttribute(accessoryArray, 1);
 
-    this.positionStorage = storage(this.posAttribute, 'vec4', this.instanceCount);
-    this.velocityStorage = storage(this.velAttribute, 'vec4', this.instanceCount);
+    // setPBO(true): WebGL2 fallback must sample storage from the vertex shader via textures.
+    this.positionStorage = storage(this.posAttribute, 'vec4', this.instanceCount).setPBO(true);
+    this.velocityStorage = storage(this.velAttribute, 'vec4', this.instanceCount).setPBO(true);
+
+    if (!this.useWebGPU) {
+      const pos3 = new Float32Array(this.instanceCount * 3);
+      const facing = new Float32Array(this.instanceCount * 3);
+      const alpha = new Float32Array(this.instanceCount);
+      for (let i = 0; i < this.instanceCount; i++) {
+        pos3[i * 3] = posArray[i * 4];
+        pos3[i * 3 + 1] = posArray[i * 4 + 1];
+        pos3[i * 3 + 2] = posArray[i * 4 + 2];
+        facing[i * 3 + 2] = 1;
+        alpha[i] = 1;
+      }
+      this.instancePosAttr = new THREE.InstancedBufferAttribute(pos3, 3);
+      this.instanceFacingAttr = new THREE.InstancedBufferAttribute(facing, 3);
+      this.instanceAlphaAttr = new THREE.InstancedBufferAttribute(alpha, 1);
+      this.expressionAttr = new THREE.InstancedBufferAttribute(new Float32Array(this.instanceCount * 4), 4);
+    }
 
     // Physics & state buffer — all start at mode 0 (IDLE)
     this.agentStateBuffer = new AgentStateBuffer(this.instanceCount);
@@ -294,7 +342,12 @@ export class CharacterManager {
 
     this.expressionBuffer = new ExpressionBuffer(this.instanceCount);
 
-    this.initComputeNode();
+    if (this.useWebGPU) {
+      this.initComputeNode();
+    } else {
+      this.computeNode = null;
+      console.warn('[CharacterManager] WebGL mode: CPU movement + bind-pose characters (no storage shaders).');
+    }
     this.createInstancedMesh();
   }
 
@@ -357,9 +410,39 @@ export class CharacterManager {
       instancedGeometry.copy(geometry as any);
       instancedGeometry.instanceCount = this.instanceCount;
 
+      // Drop null/undefined attrs so NodeBuilder never calls getTypeFromAttribute(null).
+      for (const attrName of Object.keys(instancedGeometry.attributes)) {
+        if (!instancedGeometry.attributes[attrName]) {
+          instancedGeometry.deleteAttribute(attrName);
+        }
+      }
+
+      // WebGL2: integer JOINTS_0 attrs often break NodeMaterial — promote to float.
+      const skinIndexAttr = instancedGeometry.getAttribute('skinIndex');
+      if (skinIndexAttr && !(skinIndexAttr.array instanceof Float32Array)) {
+        instancedGeometry.setAttribute(
+          'skinIndex',
+          new THREE.BufferAttribute(new Float32Array(skinIndexAttr.array as ArrayLike<number>), 4)
+        );
+      }
+      const skinWeightAttr = instancedGeometry.getAttribute('skinWeight');
+      if (skinWeightAttr && !(skinWeightAttr.array instanceof Float32Array)) {
+        instancedGeometry.setAttribute(
+          'skinWeight',
+          new THREE.BufferAttribute(new Float32Array(skinWeightAttr.array as ArrayLike<number>), 4)
+        );
+      }
+
       // Solo dejamos el atributo que NO se calcula en el Compute Shader
-      instancedGeometry.setAttribute('instanceColor', this.colorAttribute);
+      instancedGeometry.setAttribute('instanceColor', this.colorAttribute!);
       if (this.accessoryAttribute) instancedGeometry.setAttribute('accessoryType', this.accessoryAttribute);
+
+      if (!this.useWebGPU) {
+        instancedGeometry.setAttribute('instancePos', this.instancePosAttr!);
+        instancedGeometry.setAttribute('instanceFacing', this.instanceFacingAttr!);
+        instancedGeometry.setAttribute('instanceAlpha', this.instanceAlphaAttr!);
+        instancedGeometry.setAttribute('expressionData', this.expressionAttr!);
+      }
 
       const material = new THREE.MeshStandardNodeMaterial();
       material.roughness = 1;
@@ -368,9 +451,12 @@ export class CharacterManager {
       const instanceColor = attribute('instanceColor', 'vec3');
       const map = (baseMaterial as any).map;
 
-      const expressionData = this.expressionBuffer!.storageNode.element(instanceIndex);
-      const animParams = this.agentStateBuffer!.storageNode.element(instanceIndex.mul(2).add(1));
-      const instanceAlpha = animParams.z;
+      const expressionData = this.useWebGPU
+        ? this.expressionBuffer!.storageNode.element(instanceIndex)
+        : attribute('expressionData', 'vec4');
+      const instanceAlpha = this.useWebGPU
+        ? this.agentStateBuffer!.storageNode.element(instanceIndex.mul(2).add(1)).z
+        : attribute('instanceAlpha', 'float');
       const accessoryType = attribute('accessoryType', 'float');
 
       const isEyes = name.toLowerCase().includes('eyes');
@@ -435,7 +521,9 @@ export class CharacterManager {
       }
 
       const isVisible = isHeadphones ? accessoryType.equal(float(1)) : (isCap ? accessoryType.equal(float(2)) : float(1));
-      const vertexNode = this.createVertexNode(isVisible.and(instanceAlpha.greaterThan(0)));
+      const vertexNode = this.useWebGPU
+        ? this.createVertexNode(isVisible.and(instanceAlpha.greaterThan(0)))
+        : this.createWebGLVertexNode(isVisible.and(instanceAlpha.greaterThan(0)));
       material.positionNode = vertexNode;
       (material as any).castShadowPositionNode = vertexNode;
 
@@ -448,6 +536,103 @@ export class CharacterManager {
       this.scene.add(instancedMesh);
       this.instancedMeshes.push(instancedMesh);
     }
+  }
+
+  /** WebGL2-safe vertex transform: instanced attrs only (bind pose, no storage skinning). */
+  private createWebGLVertexNode(isVisibleNode: any) {
+    return Fn(() => {
+      const instancePos = attribute('instancePos', 'vec3');
+      const facing = attribute('instanceFacing', 'vec3');
+
+      const angle = atan(facing.z, facing.x).negate().add(float(Math.PI / 2));
+      const rotationMat = mat3(
+        vec3(cos(angle), float(0), sin(angle).negate()),
+        vec3(float(0), float(1), float(0)),
+        vec3(sin(angle), float(0), cos(angle))
+      );
+
+      const vertexScale = isVisibleNode.select(float(1), float(0));
+      return rotationMat.mul(positionLocal.mul(vertexScale)).add(instancePos);
+    })();
+  }
+
+  /** CPU GOTO integration when compute shaders are unavailable. */
+  private simulateMovementCPU(delta: number) {
+    if (!this.debugPosArray || !this.agentStateBuffer) return;
+    const step = Math.min(delta, 0.05) * 1.35;
+
+    for (let i = 0; i < this.instanceCount; i++) {
+      if (this.agentStateBuffer.getState(i) !== AgentBehavior.GOTO) continue;
+      const wp = this.agentStateBuffer.getWaypoint(i);
+      const x = this.debugPosArray[i * 4];
+      const z = this.debugPosArray[i * 4 + 2];
+      const dx = wp.x - x;
+      const dz = wp.z - z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 0.2) {
+        this.debugPosArray[i * 4] = wp.x;
+        this.debugPosArray[i * 4 + 2] = wp.z;
+      } else {
+        this.debugPosArray[i * 4] += (dx / dist) * step;
+        this.debugPosArray[i * 4 + 2] += (dz / dist) * step;
+      }
+    }
+
+    if (this.posAttribute) {
+      (this.posAttribute.array as Float32Array).set(this.debugPosArray);
+      this.posAttribute.needsUpdate = true;
+    }
+  }
+
+  private syncWebGLInstanceAttrs() {
+    if (
+      !this.instancePosAttr ||
+      !this.instanceFacingAttr ||
+      !this.instanceAlphaAttr ||
+      !this.expressionAttr ||
+      !this.debugPosArray ||
+      !this.agentStateBuffer ||
+      !this.expressionBuffer
+    ) {
+      return;
+    }
+
+    const pos = this.instancePosAttr.array as Float32Array;
+    const facing = this.instanceFacingAttr.array as Float32Array;
+    const alpha = this.instanceAlphaAttr.array as Float32Array;
+
+    for (let i = 0; i < this.instanceCount; i++) {
+      pos[i * 3] = this.debugPosArray[i * 4];
+      pos[i * 3 + 1] = this.debugPosArray[i * 4 + 1];
+      pos[i * 3 + 2] = this.debugPosArray[i * 4 + 2];
+
+      const wp = this.agentStateBuffer.getWaypoint(i);
+      const state = this.agentStateBuffer.getState(i);
+      if (state === AgentBehavior.GOTO) {
+        const dx = wp.x - pos[i * 3];
+        const dz = wp.z - pos[i * 3 + 2];
+        const len = Math.hypot(dx, dz) || 1;
+        facing[i * 3] = dx / len;
+        facing[i * 3 + 1] = 0;
+        facing[i * 3 + 2] = dz / len;
+      } else if (Math.hypot(wp.x, wp.z) > 0.01) {
+        facing[i * 3] = wp.x;
+        facing[i * 3 + 1] = 0;
+        facing[i * 3 + 2] = wp.z;
+      } else {
+        facing[i * 3] = 0;
+        facing[i * 3 + 1] = 0;
+        facing[i * 3 + 2] = 1;
+      }
+
+      alpha[i] = this.agentStateBuffer.getAlpha(i);
+    }
+
+    (this.expressionAttr.array as Float32Array).set(this.expressionBuffer.array);
+    this.instancePosAttr.needsUpdate = true;
+    this.instanceFacingAttr.needsUpdate = true;
+    this.instanceAlphaAttr.needsUpdate = true;
+    this.expressionAttr.needsUpdate = true;
   }
 
   private createVertexNode(isVisibleNode: any) {
@@ -480,8 +665,9 @@ export class CharacterManager {
       const finalPosition = positionLocal.toVar();
 
       if (this.bakedAnimationsBuffer && this.metaBuffer) {
-        const animBuffer = storage(this.bakedAnimationsBuffer, 'mat4', this.bakedAnimationsBuffer.count);
-        const metaStorage = storage(this.metaBuffer, 'vec4', this.metaBuffer.count);
+        const mat4Count = Math.floor(this.bakedAnimationsBuffer.array.length / 16);
+        const animBuffer = storage(this.bakedAnimationsBuffer, 'mat4', mat4Count).setPBO(true).toReadOnly();
+        const metaStorage = storage(this.metaBuffer, 'vec4', this.metaBuffer.count).setPBO(true).toReadOnly();
 
         const animIndex = agentData.y.toUint();
 
@@ -499,8 +685,8 @@ export class CharacterManager {
         const currentFrame = t.mul(numFrames.toFloat()).toUint();
         const safeFrame = currentFrame.min(numFrames.sub(uint(1)));
 
-        const skinIndex = attribute('skinIndex');
-        const skinWeight = attribute('skinWeight');
+        const skinIndex = attribute('skinIndex', 'vec4');
+        const skinWeight = attribute('skinWeight', 'vec4');
         const skinMat = mat4(0).toVar();
 
         const addInfluence = (boneIdxNode: any, weightNode: any) => {
@@ -579,11 +765,17 @@ export class CharacterManager {
     arr[index * 4 + 1] = position.y;
     arr[index * 4 + 2] = position.z;
     this.posAttribute.needsUpdate = true;
-    // Also update the CPU mirror so getCPUPosition() is immediately accurate
     if (this.debugPosArray) {
       this.debugPosArray[index * 4 + 0] = position.x;
       this.debugPosArray[index * 4 + 1] = position.y;
       this.debugPosArray[index * 4 + 2] = position.z;
+    }
+    if (this.instancePosAttr) {
+      const p = this.instancePosAttr.array as Float32Array;
+      p[index * 3] = position.x;
+      p[index * 3 + 1] = position.y;
+      p[index * 3 + 2] = position.z;
+      this.instancePosAttr.needsUpdate = true;
     }
   }
 

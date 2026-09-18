@@ -1,7 +1,8 @@
 
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import { AgenticSystem, DEFAULT_AGENTIC_SET_ID, getAgentSet } from '../../data/agents';
+import { AGENTIC_SETS, AgenticSystem, DEFAULT_AGENTIC_SET_ID, getAgentSet } from '../../data/agents';
+import { resolveImageOutputModel } from '../../core/llm/constants';
 
 export type AgentSet = AgenticSystem;
 
@@ -62,6 +63,59 @@ export const useTeamStore = create<TeamState>()(
     {
       name: 'team-storage',
       storage: createJSONStorage(() => localStorage),
+      merge: (persisted, current) => {
+        const saved = (persisted || {}) as Partial<TeamState>;
+        const allowedTeamIds = new Set([
+          'manhwa-studio',
+          'developer-studio',
+          'social-creative-studio',
+          'website-banner-studio',
+          'logo-design-studio',
+          'video-studio',
+        ]);
+        const customSystems = (saved.customSystems || [])
+          .filter((system) => allowedTeamIds.has(system.id))
+          .map((system) => {
+          if (system.id === 'manhwa-studio') {
+            const builtIn = AGENTIC_SETS.find((candidate) => candidate.id === system.id)!;
+            const builtInWorkers = new Map(
+              (builtIn.leadAgent.subagents || []).map((agent) => [agent.id, agent])
+            );
+            return {
+              ...system,
+              outputType: builtIn.outputType,
+              outputModel: builtIn.outputModel,
+              panelImageModel: builtIn.panelImageModel,
+              outputAutoApprove: builtIn.outputAutoApprove,
+              leadAgent: {
+                ...system.leadAgent,
+                model: builtIn.leadAgent.model,
+                subagents: (system.leadAgent.subagents || builtIn.leadAgent.subagents || []).map((agent) => ({
+                  ...agent,
+                  model: builtInWorkers.get(agent.id)?.model || builtIn.outputModel,
+                })),
+              },
+            };
+          }
+          if (system.outputType !== 'image') return system;
+          return {
+            ...system,
+            outputType: 'image' as const,
+            outputModel: resolveImageOutputModel(system.id),
+            outputAutoApprove: true,
+          };
+        });
+        const selectedAgentSetId =
+          saved.selectedAgentSetId && allowedTeamIds.has(saved.selectedAgentSetId)
+            ? saved.selectedAgentSetId
+            : DEFAULT_AGENTIC_SET_ID;
+        return {
+          ...current,
+          ...saved,
+          customSystems,
+          selectedAgentSetId,
+        };
+      },
     }
   )
 );

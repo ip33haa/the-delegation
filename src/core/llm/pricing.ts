@@ -9,13 +9,16 @@ export interface ModelPricing {
 }
 
 export const GEMINI_PRICING: Record<string, ModelPricing> = {
-  // Text Models
-  [DEFAULT_MODELS.text]: { inputPer1M: 0.50, outputPer1M: 3.00 },
-  'gemini-3.1-pro-preview': { inputPer1M: 2.00, outputPer1M: 12.00 },
-  'gemini-3.1-flash-lite-preview': { inputPer1M: 0.25, outputPer1M: 1.50 },
+  // Text Models (OpenAI chat)
+  [DEFAULT_MODELS.text]: { inputPer1M: 0.15, outputPer1M: 0.60 },
+  'gpt-4o': { inputPer1M: 2.50, outputPer1M: 10.00 },
+  'gpt-4.1-mini': { inputPer1M: 0.40, outputPer1M: 1.60 },
   
-  // Image Models (local ComfyUI / Z-Image Turbo — no API cost)
+  // Image Models
   [DEFAULT_MODELS.image]: { perImage: 0 },
+  'gemini-3.1-flash-image': { perImage: 0.067 },
+  'gemini-2.5-flash-image': { perImage: 0.039 },
+  'gemini-3-pro-image-preview': { perImage: 0.134 },
   
   // Music Models
   [DEFAULT_MODELS.music]: { perSong: 0.040 },
@@ -25,6 +28,7 @@ export const GEMINI_PRICING: Record<string, ModelPricing> = {
   [DEFAULT_MODELS.video]: { perSecond: 0.050 },
   'veo-3.1-fast-generate-preview': { perSecond: 0.150 },
   'veo-3.1-generate-preview': { perSecond: 0.400 },
+  'wan-2.2-ti2v-5b': { perSecond: 0 },
 };
 
 export const DEFAULT_PRICING: ModelPricing = GEMINI_PRICING[DEFAULT_MODELS.text];

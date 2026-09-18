@@ -70,39 +70,71 @@ export function OutputReviewModal() {
   }
 
   const renderImageControls = () => (
-    <div className="grid grid-cols-2 gap-4">
-      <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 flex items-center gap-1.5">
-          <Maximize size={12} /> Aspect Ratio
-          <InfoBubble text="The horizontal or vertical proportions of the generated asset." />
-        </label>
-        <select
-          value={params.aspectRatio || '16:9'}
-          onChange={(e) => updateParam('aspectRatio', e.target.value)}
-          className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-darkDelegation outline-none"
-        >
-          <option value="1:1">1:1 Square</option>
-          <option value="16:9">16:9 Cinematic</option>
-          <option value="9:16">9:16 Vertical</option>
-          <option value="4:3">4:3 Classic</option>
-          <option value="3:2">3:2 Professional</option>
-        </select>
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 flex items-center gap-1.5">
+            <Maximize size={12} /> Aspect Ratio
+            <InfoBubble text="The horizontal or vertical proportions of the generated asset." />
+          </label>
+          <select
+            value={params.aspectRatio || '16:9'}
+            onChange={(e) => updateParam('aspectRatio', e.target.value)}
+            className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-darkDelegation outline-none"
+          >
+            <option value="1:1">1:1 Square</option>
+            <option value="16:9">16:9 Cinematic</option>
+            <option value="9:16">9:16 Vertical</option>
+            <option value="4:3">4:3 Classic</option>
+            <option value="3:2">3:2 Professional</option>
+            <option value="3:4">3:4 Portrait</option>
+          </select>
+        </div>
+        <div className="space-y-2">
+          <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 flex items-center gap-1.5">
+            <Settings2 size={12} /> Image Size
+            <InfoBubble text="Target dimensions for the final image. Higher sizes offer more detail but may take longer." />
+          </label>
+          <select
+            value={params.imageSize || '1024'}
+            onChange={(e) => updateParam('imageSize', e.target.value)}
+            className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-darkDelegation outline-none"
+          >
+            <option value="512">512px (Fast)</option>
+            <option value="768">768px</option>
+            <option value="1024">1024px (Native)</option>
+          </select>
+        </div>
       </div>
-      <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 flex items-center gap-1.5">
-          <Settings2 size={12} /> Image Size
-          <InfoBubble text="Target dimensions for the final image. Higher sizes offer more detail but may take longer." />
-        </label>
-        <select
-          value={params.imageSize || '1K'}
-          onChange={(e) => updateParam('imageSize', e.target.value)}
-          className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-darkDelegation outline-none"
-        >
-          <option value="512">512px (Fast)</option>
-          <option value="1K">1K (Standard)</option>
-          <option value="2K">2K (High Res)</option>
-          <option value="4K">4K (Ultra)</option>
-        </select>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 flex items-center gap-1.5">
+            <Sparkles size={12} /> Quality Mode
+            <InfoBubble text="Turbo uses the official Z-Image recipe. Detail uses dpmpp_sde for richer texture." />
+          </label>
+          <select
+            value={params.qualityMode || 'turbo'}
+            onChange={(e) => updateParam('qualityMode', e.target.value)}
+            className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-darkDelegation outline-none"
+          >
+            <option value="turbo">Turbo (official)</option>
+            <option value="detail">Detail (dpmpp_sde)</option>
+          </select>
+        </div>
+        <div className="space-y-2">
+          <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 flex items-center gap-1.5">
+            <Check size={12} /> Refine Pass
+            <InfoBubble text="Second light denoise pass for cleaner texture. Recommended for final delivers." />
+          </label>
+          <select
+            value={params.refine === false ? 'off' : 'on'}
+            onChange={(e) => updateParam('refine', e.target.value === 'on')}
+            className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-darkDelegation outline-none"
+          >
+            <option value="on">On (recommended)</option>
+            <option value="off">Off (faster)</option>
+          </select>
+        </div>
       </div>
     </div>
   )
@@ -120,9 +152,10 @@ export function OutputReviewModal() {
             onChange={(e) => updateParam('resolution', e.target.value)}
             className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-darkDelegation outline-none"
           >
+            <option value="480p">480p (Local Wan / 8GB)</option>
             <option value="720p">720p HD</option>
-            <option value="1080p">1080p Full HD</option>
-            <option value="4k">4K Vision</option>
+            <option value="1080p">1080p Full HD (Veo)</option>
+            <option value="4k">4K Vision (Veo)</option>
           </select>
         </div>
         <div className="space-y-2">
@@ -153,7 +186,9 @@ export function OutputReviewModal() {
         <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 flex items-center gap-1.5">
           <Sparkles size={12} /> Generation Model
           <InfoBubble text={activeTeam.outputType === 'image'
-            ? 'Local Z-Image Turbo via ComfyUI (no Gemini image API). Keep ComfyUI running on port 8188.'
+            ? 'Local Z-Image Turbo via ComfyUI, or Gemini when keyed. Quality Mode and Refine apply to local Z-Image.'
+            : activeTeam.outputType === 'video'
+              ? 'Veo models need GEMINI_API_KEY. wan-2.2-ti2v-5b runs locally in ComfyUI after you download Wan weights.'
             : 'Select the specific Gemini model used for the final generation. Flash models are faster, Pro models are more capable.'} />
         </label>
         <select

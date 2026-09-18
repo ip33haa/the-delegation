@@ -15,6 +15,9 @@ import SimulationView from './interface/SimulationView';
 import { VisualConfigurator } from './interface/VisualConfigurator/VisualConfigurator';
 import { SceneContext } from './simulation/SceneContext';
 import { SceneManager } from './simulation/SceneManager';
+import { initializeProjectMemory } from './core/persistence/coordinator';
+import { useMemoryStore } from './integration/store/memoryStore';
+import { ProjectLibraryModal } from './interface/ProjectLibraryModal';
 
 
 const App: React.FC = () => {
@@ -25,6 +28,11 @@ const App: React.FC = () => {
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [kanbanHeight, setKanbanHeight] = useState(220);
+  const { initialized: memoryInitialized } = useMemoryStore();
+
+  useEffect(() => {
+    void initializeProjectMemory();
+  }, []);
 
   const startResizing = useCallback(() => {
     setIsResizing(true);
@@ -56,17 +64,18 @@ const App: React.FC = () => {
   }, [resize, stopResizing]);
 
   useEffect(() => {
-    if (canvasRef.current && !managerRef.current) {
+    if (memoryInitialized && canvasRef.current && !managerRef.current) {
       const manager = new SceneManager(canvasRef.current);
       managerRef.current = manager;
       setSceneManager(manager);
     }
+  }, [memoryInitialized]);
 
+  useEffect(() => {
     return () => {
       if (managerRef.current) {
         managerRef.current.dispose();
         managerRef.current = null;
-        setSceneManager(null);
       }
     };
   }, []);
@@ -126,6 +135,7 @@ const App: React.FC = () => {
         {/* Final output — fixed viewport overlay */}
         <FinalOutputModal />
         <OutputReviewModal />
+        <ProjectLibraryModal />
       </div>
     </SceneContext.Provider>
   );

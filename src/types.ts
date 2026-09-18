@@ -29,6 +29,8 @@ export interface CharacterState {
   // Real-time agent statuses for 3D synchronization
   agentStatuses: Record<number, AgentState>;
   setAgentStatus: (index: number, status: AgentState) => void;
+  agentCheckIns: Record<number, string>;
+  setAgentCheckIn: (index: number, message: string | null) => void;
 
   isBYOKOpen: boolean;
   byokError: string | null;

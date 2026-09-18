@@ -47,7 +47,8 @@ export class ExpressionBuffer {
   constructor(private readonly count: number) {
     this.array = new Float32Array(count * 4);
     this.attribute = new THREE.StorageInstancedBufferAttribute(this.array, 4);
-    this.storageNode = storage(this.attribute, 'vec4', count);
+    // PBO required so WebGL2 fallback can sample this from materials.
+    this.storageNode = storage(this.attribute, 'vec4', count).setPBO(true);
 
     for (let i = 0; i < count; i++) {
       this.speakingStates[i] = false;

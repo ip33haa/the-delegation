@@ -21,9 +21,16 @@ export const useUiStore = create<CharacterState>()(
     chatMessages: [],
     inspectorTab: 'info',
     agentStatuses: {},
+    agentCheckIns: {},
     setAgentStatus: (index: number, status: AgentState) => set((s) => ({
       agentStatuses: { ...s.agentStatuses, [index]: status }
     })),
+    setAgentCheckIn: (index: number, message: string | null) => set((s) => {
+      const next = { ...s.agentCheckIns };
+      if (message) next[index] = message;
+      else delete next[index];
+      return { agentCheckIns: next };
+    }),
 
     isBYOKOpen: false,
     byokError: null,
@@ -34,12 +41,18 @@ export const useUiStore = create<CharacterState>()(
     setActiveAuditTaskId: (taskId: string | null) => set({ activeAuditTaskId: taskId }),
 
     llmConfig: (() => {
+      const envKey = process.env.GEMINI_API_KEY || '';
       try {
         const saved = localStorage.getItem('byok-config');
-        if (saved) return JSON.parse(saved);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (!parsed.apiKey && envKey) parsed.apiKey = envKey;
+          parsed.model = DEFAULT_MODELS.text;
+          return parsed;
+        }
       } catch { }
       return {
-        apiKey: '',
+        apiKey: envKey,
         model: DEFAULT_MODELS.text
       };
     })(),
@@ -80,6 +93,9 @@ export const useUiStore = create<CharacterState>()(
 useTeamStore.subscribe((state, prevState) => {
   if (state.selectedAgentSetId !== prevState.selectedAgentSetId) {
     const system = getActiveAgentSet();
-    useUiStore.getState().setInstanceCount(getAllAgents(system).length + 1);
+    useUiStore.setState({
+      instanceCount: getAllAgents(system).length + 1,
+      agentCheckIns: {},
+    });
   }
 });

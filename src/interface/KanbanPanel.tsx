@@ -1,9 +1,9 @@
-import { ChevronDown, ChevronRight, MessageSquareWarning, Trash2, GitPullRequest } from 'lucide-react'
+import { ChevronDown, ChevronRight, Loader2, Trash2, GitPullRequest } from 'lucide-react'
 import React, { useState } from 'react'
 import { getAllAgents, USER_NAME } from '../data/agents'
 import { USER_COLOR, USER_COLOR_LIGHT, USER_COLOR_SOFT } from '../theme/brand'
 import { useCoreStore, type Task, type TaskStatus } from '../integration/store/coreStore'
-import { getActiveAgentSet, useTeamStore } from '../integration/store/teamStore'
+import { getActiveAgentSet, useActiveTeam } from '../integration/store/teamStore'
 import { useUiStore } from '../integration/store/uiStore'
 import DeleteTaskModal from './DeleteTaskModal'
 
@@ -49,6 +49,14 @@ function TaskCard({ task }: { task: Task; key?: string }) {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const { removeTask } = useCoreStore()
   const { setSelectedNpc, setActiveAuditTaskId } = useUiStore()
+  const activeOperation = useCoreStore((state) => state.activeOperation)
+  const isDeliveryCard = task.parentTaskId === '__chapter_editor_delivery__'
+  const operationForTask =
+    activeOperation &&
+    (activeOperation.agentIndex === task.assignedAgentId ||
+      (isDeliveryCard && activeOperation.stage === 'generating_image'))
+      ? activeOperation
+      : null
 
   // For visual representation, we show both the owner and any consultation target
   const effectiveAgentIds = [task.assignedAgentId];
@@ -70,7 +78,7 @@ function TaskCard({ task }: { task: Task; key?: string }) {
         </h3>
         <div className="flex items-center gap-1 opacity-100 group-hover:opacity-100 transition-opacity">
 
-          {task.status !== 'done' && (
+          {task.status !== 'done' && !isDeliveryCard && (
             <>
               <button
                 onClick={(e) => {
@@ -102,6 +110,15 @@ function TaskCard({ task }: { task: Task; key?: string }) {
         </p>
       )}
 
+      {operationForTask && (
+        <div className={`flex items-start gap-2 rounded-md px-2 py-1.5 text-[9px] font-bold ${
+          operationForTask.stage === 'error' ? 'bg-red-50 text-red-700' : 'bg-violet-50 text-violet-700'
+        }`}>
+          {operationForTask.stage !== 'error' && <Loader2 size={11} className="mt-0.5 shrink-0 animate-spin" />}
+          <span>{operationForTask.label}</span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between gap-x-2 gap-y-1 pt-1">
         <div className="flex flex-wrap gap-x-2 gap-y-1">
           {effectiveAgentIds.map(renderAgentTag)}
@@ -121,7 +138,7 @@ function TaskCard({ task }: { task: Task; key?: string }) {
             </span>
           )}
 
-          {(task.status === 'done' || task.draftOutput || (task.revisions && task.revisions.length > 0)) && (
+          {!isDeliveryCard && (task.status === 'done' || task.draftOutput || (task.revisions && task.revisions.length > 0)) && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -145,18 +162,52 @@ function TaskCard({ task }: { task: Task; key?: string }) {
 }
 
 export function KanbanPanel({ height = 320 }: KanbanPanelProps) {
-  const { tasks } = useCoreStore()
+  const { tasks, phase, manhwaProject, activeOperation } = useCoreStore()
+  const activeTeam = useActiveTeam()
+  const workersDone = tasks.length > 0 && tasks.every((task) => task.status === 'done')
+  const showChapterEditor =
+    activeTeam.id === 'manhwa-studio' && (workersDone || Boolean(manhwaProject))
+  const chapterEditorTask: Task | null = showChapterEditor ? {
+    id: '__chapter_editor_delivery__',
+    title: 'Chapter Editor final panel package',
+    description:
+      activeOperation?.agentIndex === 1
+        ? activeOperation.label
+        : manhwaProject
+          ? 'Final character bible, six-panel script, and image prompts are ready.'
+          : 'Reconciles all completed specialist work into the final character and panel package.',
+    assignedAgentId: 1,
+    status: phase === 'done' && manhwaProject ? 'done' : 'in_progress',
+    parentTaskId: '__chapter_editor_delivery__',
+    requiresUserApproval: false,
+    revisions: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  } : null
+  const displayTasks = chapterEditorTask ? [...tasks, chapterEditorTask] : tasks
 
   return (
     <div
       className="w-full bg-white border-t border-black/8 flex flex-col pointer-events-auto shrink-0 relative"
       style={{ height }}
     >
+      {activeOperation && (
+        <div className={`flex shrink-0 items-center gap-2 border-b px-5 py-2 text-[10px] font-bold ${
+          activeOperation.stage === 'error'
+            ? 'border-red-100 bg-red-50 text-red-700'
+            : 'border-violet-100 bg-violet-50 text-violet-700'
+        }`}>
+          {activeOperation.stage !== 'error' && <Loader2 size={12} className="animate-spin" />}
+          <span className="uppercase tracking-wider">{activeOperation.stage.replace('_', ' ')}</span>
+          <span className="font-medium normal-case tracking-normal">{activeOperation.label}</span>
+        </div>
+      )}
+
       {/* Columns Scroll Area */}
       <div className="flex-1 overflow-x-auto overflow-y-hidden bg-zinc-50/20">
         <div className="flex h-full min-w-max px-5 py-4 gap-4">
           {COLUMNS.map(({ status, label }) => {
-            const colTasks = tasks.filter((t) => t.status === status)
+            const colTasks = displayTasks.filter((t) => t.status === status)
             return (
               <div key={status} className="w-52 flex flex-col gap-3">
                 <div className="flex items-center justify-between shrink-0 select-none">

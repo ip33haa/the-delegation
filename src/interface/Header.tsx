@@ -1,10 +1,11 @@
-import { Info, KeyRound, Maximize2, Settings } from 'lucide-react';
+import { Database, Info, KeyRound, Maximize2, Settings } from 'lucide-react';
 import React, { useState } from 'react';
 import packageJson from '../../package.json';
 import { useCoreStore } from '../integration/store/coreStore';
 import { useUiStore } from '../integration/store/uiStore';
 import BYOKModal from './BYOKModal';
 import InfoModal from './InfoModal';
+import { useMemoryStore } from '../integration/store/memoryStore';
 
 const version = packageJson.version;
 
@@ -13,6 +14,7 @@ const Header: React.FC = () => {
   const { setViewMode } = useCoreStore();
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const hasKey = !!llmConfig.apiKey;
+  const memory = useMemoryStore();
 
   const handleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -69,6 +71,17 @@ const Header: React.FC = () => {
 
       {/* Right: Global Controls */}
       <div className="flex items-center gap-3">
+        <button
+          onClick={() => memory.setLibraryOpen(true)}
+          className="relative flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-zinc-600 hover:bg-zinc-50"
+          title={memory.status === 'online' ? 'Saved projects' : 'Memory API offline'}
+        >
+          <Database size={14} />
+          <span className="hidden text-[10px] font-black uppercase tracking-wider sm:inline">Projects</span>
+          <span className={`absolute right-1 top-1 h-1.5 w-1.5 rounded-full ${
+            memory.status === 'online' ? 'bg-emerald-500' : memory.status === 'checking' ? 'bg-amber-400' : 'bg-red-400'
+          }`} />
+        </button>
 
         <button
           onClick={() => setViewMode('design')}

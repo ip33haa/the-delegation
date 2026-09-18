@@ -5,6 +5,7 @@ import { useCoreStore } from '../integration/store/coreStore'
 import { useActiveTeam } from '../integration/store/teamStore'
 import { Loader2, Download } from 'lucide-react'
 import { TeamOutputBadge } from './components/TeamOutputBadge'
+import { ManhwaPanelGallery } from './ManhwaPanelGallery'
 
 export function FinalOutputModal() {
   const {
@@ -13,8 +14,11 @@ export function FinalOutputModal() {
     finalOutput,
     finalAssetType,
     finalAssetContent,
+    finalAssetUrl,
     isGeneratingAsset,
-    referenceImages
+    assetGenerationError,
+    referenceImages,
+    manhwaProject
   } = useCoreStore()
   const activeTeam = useActiveTeam()
   const [copied, setCopied] = useState(false)
@@ -29,11 +33,26 @@ export function FinalOutputModal() {
   }
 
   const handleDownload = () => {
-    if (!finalAssetContent) return;
-
     const link = document.createElement('a');
+    if (finalAssetType === 'text') {
+      if (!finalOutput) return;
+      const blob = new Blob([finalOutput], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const teamSlug = (activeTeam.teamName || 'chapter')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+      link.href = url;
+      link.download = `${teamSlug || 'chapter'}-${Date.now()}.md`;
+      link.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    if (!finalAssetContent && !finalAssetUrl) return;
+
     if (finalAssetType === 'image') {
-      link.href = `data:image/png;base64,${finalAssetContent}`;
+      link.href = finalAssetContent ? `data:image/png;base64,${finalAssetContent}` : finalAssetUrl!;
       link.download = `agentic-image-${Date.now()}.png`;
     } else if (finalAssetType === 'audio') {
       link.href = `data:audio/mp3;base64,${finalAssetContent}`;
@@ -47,11 +66,33 @@ export function FinalOutputModal() {
   }
 
   const renderContent = () => {
+    if (activeTeam.id === 'manhwa-studio' && manhwaProject) {
+      return <ManhwaPanelGallery />;
+    }
+
     if (isGeneratingAsset) {
       return (
         <div className="flex flex-col items-center justify-center py-20 gap-4">
           <Loader2 className="animate-spin text-zinc-300" size={40} strokeWidth={1.5} />
-          <p className="text-zinc-400 font-black uppercase tracking-widest text-[10px]">Generating {finalAssetType} asset...</p>
+          <p className="text-zinc-400 font-black uppercase tracking-widest text-[10px]">
+            Generating image with {activeTeam.outputModel?.includes('gemini') ? 'Nano Banana 2…' : 'Z-Image Turbo…'}
+          </p>
+          {finalOutput && (
+            <p className="text-xs text-zinc-400 italic max-w-md text-center line-clamp-3">{finalOutput}</p>
+          )}
+        </div>
+      );
+    }
+
+    if (finalAssetType === 'image' && !finalAssetContent && !finalAssetUrl) {
+      return (
+        <div className="space-y-3 py-10 text-center">
+          <p className="text-sm font-bold text-zinc-700">Image generation did not finish.</p>
+          <p className="text-xs text-zinc-500 max-w-md mx-auto">
+            {assetGenerationError || (activeTeam.outputModel?.includes('gemini')
+              ? 'Check GEMINI_API_KEY in .env and your AI Studio quota, then deliver again.'
+              : 'Keep ComfyUI running on port 8188, then have the lead deliver again.')}
+          </p>
         </div>
       );
     }
@@ -64,12 +105,12 @@ export function FinalOutputModal() {
       );
     }
 
-    if (finalAssetType === 'image' && finalAssetContent) {
+    if (finalAssetType === 'image' && (finalAssetContent || finalAssetUrl)) {
       return (
         <div className="space-y-4">
           <div className="relative group">
             <img
-              src={`data:image/png;base64,${finalAssetContent}`}
+              src={finalAssetContent ? `data:image/png;base64,${finalAssetContent}` : finalAssetUrl!}
               alt="Final Generated Asset"
               className="w-full rounded-2xl shadow-xl border border-black/5"
             />
@@ -201,12 +242,23 @@ export function FinalOutputModal() {
             <div className="text-[9px] font-bold text-zinc-300 uppercase tracking-widest leading-none">
               Generated March 2026
             </div>
-            <button
-              onClick={handleCopy}
-              className="px-6 py-3 bg-darkDelegation text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.15em] hover:bg-black active:scale-[0.98] transition-all shadow-lg shadow-black/10"
-            >
-              {copied ? 'Copied!' : `Copy ${finalAssetType === 'text' ? 'Output' : 'Prompt'}`}
-            </button>
+            <div className="flex items-center gap-2">
+              {finalAssetType === 'text' && finalOutput && (
+                <button
+                  onClick={handleDownload}
+                  className="px-4 py-3 border border-zinc-200 bg-white text-zinc-600 rounded-2xl text-[10px] font-black uppercase tracking-[0.12em] hover:bg-zinc-50 active:scale-[0.98] transition-all flex items-center gap-2"
+                >
+                  <Download size={14} />
+                  Download Markdown
+                </button>
+              )}
+              <button
+                onClick={handleCopy}
+                className="px-6 py-3 bg-darkDelegation text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.15em] hover:bg-black active:scale-[0.98] transition-all shadow-lg shadow-black/10"
+              >
+                {copied ? 'Copied!' : `Copy ${finalAssetType === 'text' ? 'Output' : 'Prompt'}`}
+              </button>
+            </div>
           </div>
         </div>
       </div>

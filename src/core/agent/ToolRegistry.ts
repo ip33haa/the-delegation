@@ -3,6 +3,7 @@ import { setUserBrief } from './tools/setUserBrief';
 import { proposeTask } from './tools/proposeTask';
 import { completeTask } from './tools/completeTask';
 import { deliverProject } from './tools/deliverProject';
+import { getActiveAgentSet } from '../../integration/store/teamStore';
 
 export interface ToolCall {
   name: string;
@@ -106,12 +107,91 @@ export class ToolRegistry {
       );
 
       if (isLead) {
+        const isManhwa = getActiveAgentSet()?.id === 'manhwa-studio';
         tools.push({
           type: 'function',
           function: {
             name: 'deliver_project',
-            description: 'Final delivery of the full project results.',
-            parameters: {
+            description: isManhwa
+              ? 'Deliver the locked character bible and exactly six production-ready manhwa panels.'
+              : 'Final delivery of the full project results.',
+            parameters: isManhwa ? {
+              type: 'object',
+              properties: {
+                chapterTitle: { type: 'string' },
+                premise: { type: 'string' },
+                endHook: { type: 'string' },
+                characters: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: {
+                        type: 'string',
+                        description: 'Short stable lowercase ID used by panel characterIds, for example mc or guild_clerk.'
+                      },
+                      name: { type: 'string' },
+                      visualDescription: {
+                        type: 'string',
+                        description: 'Locked face, hair, age, build, wardrobe, palette, and accessories.'
+                      },
+                      referencePrompt: {
+                        type: 'string',
+                        description: 'Text-free neutral full-body manhwa character turnaround/reference-sheet prompt.'
+                      }
+                    },
+                    required: ['id', 'name', 'visualDescription', 'referencePrompt']
+                  }
+                },
+                panels: {
+                  type: 'array',
+                  minItems: 6,
+                  maxItems: 6,
+                  items: {
+                    type: 'object',
+                    properties: {
+                      number: { type: 'integer' },
+                      visual: { type: 'string' },
+                      shot: { type: 'string' },
+                      characterIds: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'Only IDs declared in characters.'
+                      },
+                      balloons: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            speaker: { type: 'string' },
+                            text: { type: 'string' },
+                            position: { type: 'string' }
+                          },
+                          required: ['speaker', 'text', 'position']
+                        }
+                      },
+                      captions: { type: 'array', items: { type: 'string' } },
+                      sfx: { type: 'array', items: { type: 'string' } },
+                      imagePrompt: {
+                        type: 'string',
+                        description: 'One portrait manhwa panel prompt with empty balloons and absolutely no rendered text.'
+                      }
+                    },
+                    required: [
+                      'number',
+                      'visual',
+                      'shot',
+                      'characterIds',
+                      'balloons',
+                      'captions',
+                      'sfx',
+                      'imagePrompt'
+                    ]
+                  }
+                }
+              },
+              required: ['chapterTitle', 'premise', 'endHook', 'characters', 'panels']
+            } : {
               type: 'object',
               properties: { 
                 output: { 

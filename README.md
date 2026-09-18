@@ -2,101 +2,160 @@
   <img src="public/images/the-delegation.svg" width="256" alt="The Delegation Logo">
 </p>
 
-<p align="center">
-  <a href="https://arturitu.github.io/the-delegation/"><b>Launch The Delegation · Full Experience *</b></a>
-</p>
+# The Delegation (Local Fork)
 
-> [!IMPORTANT]
-> **\*** This experience requires **BYOK (Bring Your Own Key)**. You will need a **[Gemini API key](https://aistudio.google.com/app/apikey)** to run the simulation. Deep integration enables native support for text, and multimodal generation (**Nano Banana**, **Lyria 3**, **Veo 3.1**). You can also **clone or fork** this repository to run it locally.
-<div align="center">
-  <img src="public/images/the-delegation-UI.jpg" width="100%" alt="The Delegation Hero">
-</div>
+A no-code **3D multi-agent playground** where LLM-powered teammates collaborate in a shared office, then deliver a final asset.
 
-<br/>
+This repository is based on [arturitu/the-delegation](https://github.com/arturitu/the-delegation) with a **local Windows stack**:
 
-## What is The Delegation?
+| Capability | Provider |
+|---|---|
+| Agent chat + tools | **Ollama** (`llama3.2` / `qwen3.8` / `deepseek-r1`) |
+| Final **image** output | **ComfyUI** + **Z-Image Turbo** (local GPU) |
+| Music / video teams | Still Gemini (optional API key) |
 
-# A no-code 3D playground to explore, design, and interact with Agentic AI systems
+> Upstream hosted demo and Gemini BYOK flow: [arturitu.github.io/the-delegation](https://arturitu.github.io/the-delegation/)
 
-This project is designed for **AI enthusiasts, educators, and creative developers** looking to understand multi-agent collaboration in a living 3D office without writing a single line of code.
+---
 
-## Getting Started
+## Documentation
 
-1. **Install dependencies:**
+| Doc | Description |
+|---|---|
+| [docs/LOCAL_SETUP.md](docs/LOCAL_SETUP.md) | Install Ollama, ComfyUI, env, and run the app |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Code layout, stores, providers, simulation |
+| [docs/AGENTS_AND_WORKFLOW.md](docs/AGENTS_AND_WORKFLOW.md) | Teams, tools, kanban lifecycle, image prompts |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common errors (403, empty prompt, VRAM, refusals) |
+
+---
+
+## Quick start (this fork)
+
+### Prerequisites
+
+- **Node.js** 20+ recommended  
+- **Ollama** running on `http://127.0.0.1:11434`  
+- **ComfyUI** with Z-Image Turbo on `http://127.0.0.1:8188` (for image teams)  
+- NVIDIA GPU recommended (8GB VRAM tested with NVFP4 Z-Image Turbo)
+
+### 1. Install app dependencies
 
 ```bash
 npm install
 ```
 
-2. **Run the development server:**
+### 2. Pull an Ollama chat model
+
+```bash
+ollama pull llama3.2
+# stronger tools / fewer refusals (larger):
+ollama pull qwen3.8
+```
+
+### 3. Start ComfyUI (image teams)
+
+Use your portable launcher, for example:
+
+```bat
+C:\Users\<you>\ComfyUI_install\ComfyUI_windows_portable\run_z_image_turbo.bat
+```
+
+Required model files (typical layout):
+
+- `ComfyUI/models/diffusion_models/z_image_turbo_nvfp4.safetensors`
+- `ComfyUI/models/text_encoders/qwen_3_4b_fp4_mixed.safetensors`
+- `ComfyUI/models/vae/ae.safetensors`
+
+### 4. Optional `.env`
+
+```env
+# Only needed for music/video Gemini teams (or legacy BYOK UI)
+GEMINI_API_KEY=
+# Optional; OpenAI proxy exists but chat defaults to Ollama
+OPENAI_API_KEY=
+```
+
+`.env` is gitignored. Do not commit keys.
+
+### 5. Run the app
 
 ```bash
 npm run dev
 ```
 
-3. **Open the app:** Navigate to the local URL shown in your terminal (usually `http://localhost:3000/the-delegation`).
+Open the URL Vite prints (often `http://localhost:3000/the-delegation/` or `http://localhost:3001/the-delegation/` if 3000 is busy).
 
-## Features
+Keep **Ollama** and **ComfyUI** running while you work.
 
-### Agentic AI System (v0.2.0)
+---
 
-- **Team Editor (React Flow):** Create your own [multi-agent design patterns](https://developers.googleblog.com/developers-guide-to-multi-agent-patterns-in-adk/) using an interactive node-based interface.
-- **6 Predefined Teams:** Industry-specific templates (Creative Agency, Film Studio, PR Agency, etc.) to get you started.
-- **Multimodal Outputs:** Generate professional assets including text, image (Nano Banana), music (Lyria 3), and video (Veo 3.1) directly from your agent teams.
-- **Per-Agent LLM:** Assign different [Gemini Models](https://ai.google.dev/gemini-api/docs/models) to specific roles (e.g., Flash for speed, Pro for reasoning).
-- **Cost & Token Tracking:** Real-time estimation of usage costs and token consumption for transparency.
-- **PR-style Workflows:** Learn about Pull Request and Review workflows where agents with `human-in-the-loop` properties require your approval to proceed.
-- **Guardrails:** Controlled generation with the `Auto-approve output` option, ensuring quality before final asset production.
-- **Technical Logs:** Improved visibility into raw LLM traces, tool calls, and structured agent responses.
+## Features (v0.2.0 + local fork)
 
-### Embodied Simulation
+### Agentic system
 
-- **Hybrid GPU/CPU Architecture:** A high-performance **3D simulation** built with **Three.js WebGPU** where autonomous LLM-powered characters collaborate in a shared physical workspace.
-- **Intelligent Pathfinding:** NPCs utilize a NavMesh to navigate the office, finding and claiming specific "Points of Interest" (desks, seats, computers) based on their current task. Pathfinding is powered by [three-pathfinding](https://github.com/donmccurdy/three-pathfinding).
-- **Dynamic State Machine:** Characters transition naturally between walking, sitting, working, and talking, with sync'ed 3D speech bubbles and expressions.
+- **Team Editor (React Flow):** design multi-agent hierarchies  
+- **Predefined teams:** Agency, Visual Lab, Music, Film, Strategy, PR  
+- **Image teams** auto-approve and generate a real PNG via ComfyUI  
+- **Kanban + technical logs:** task board and raw LLM / tool traces  
+- **Role-specialized workers:** distinct outputs per teammate; lead synthesizes delivery  
 
-### Interactive UI
+### Embodied simulation
 
-- **Team Flow Visualizer:** Real-time node-based view of your agent hierarchy and task flows.
-- **Simulated PR Reviews:** Interactive modals for reviewing agent proposals, providing feedback, and merging tasks.
-- **Real-time 3D Overlay:** Status indicators and interaction menus projected from 3D space into a polished UI.
-- **Agent Inspector:** Select any agent to view their "thoughts", mission, and history.
-- **Kanban & Action Logs:** Complete transparency into the agency's progress and tool-level interactions.
+- **Three.js WebGPU** office with NavMesh pathfinding  
+- Characters walk / sit / work / talk based on task state  
+- Chat with the lead to set a project brief  
 
-## Tech Stack Deep Dive
+### Local AI stack
 
-- **Engine:** [Three.js](https://threejs.org/) (WebGPU & TSL) for advanced rendering and compute.
-- **UI:** [React](https://react.dev/) & [React Flow](https://reactflow.dev/) for node-based team visualization.
-- **AI:** [Gemini API](https://deepmind.google/technologies/gemini/) is the core LLM provider. We follow official prompting best practices for:
-    - **Images:** [Nano Banana Prompt Guide](https://cloud.google.com/blog/products/ai-machine-learning/ultimate-prompting-guide-for-nano-banana)
-    - **Video:** [Veo 3.1 Prompt Guide](https://cloud.google.com/blog/products/ai-machine-learning/ultimate-prompting-guide-for-veo-3-1)
-    - **Music:** [Lyria 3 Prompt Guide](https://deepmind.google/models/lyria/prompt-guide/)
-- **State:** [Zustand](https://github.com/pmndrs/zustand) for a unified, reactive store across the 3D world and React UI.
-- **3D Assets:** Custom models and animations rigged in [Blender](https://blender.org), using an instanced animation system.
+- **Chat:** Ollama via Vite proxy `/ollama`  
+- **Images:** ComfyUI via Vite proxy `/comfyui` (Origin headers stripped to avoid ComfyUI 403)  
+- **Prompt fidelity:** user brief is the core of the final image prompt; avoid invented objects  
 
-## Roadmap
+---
 
-- **World Building**
-    - [ ] **Office/3D Space Editor:** Drag-and-drop workspace layout and POI customization.
-    - [ ] **Dynamic Environment:** Real-time prop generation and environment modification by agents.
-- **Advanced Interactions**
-    - [ ] **Advanced Embodied AI:** Deeper integration between agent reasoning and physical 3D world actions.
-    - [ ] **Enhanced Animations:** Richer character expressions and more fluid, context-aware animations.
-    - [ ] **Human-Agent Spatial Interaction:** Direct collaboration and richer multi-party interactions in the 3D office.
-    - [ ] **Inter-Agent Knowledge Sharing:** Long-term memory for agent teams across projects.
-- **Refinement**
-    - [ ] **Architecture Decoupling:** Further separation of core logic from the simulation environment.
-    - [ ] **UX/UI Overhaul:** Unified CSS styling based on "The Delegation" brand identity.
+## Scripts
 
-## Developer Note
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Vite dev server on port 3000 (`0.0.0.0`) |
+| `npm run build` | Production build |
+| `npm run preview` | Preview production build |
+| `npm run lint` | `tsc --noEmit` |
 
-This release (**v0.2.0**) was developed entirely using **Google Antigravity** as the primary IDE and powered by **Gemini 3 Flash**.
+---
+
+## Tech stack
+
+- **3D:** Three.js (WebGPU / TSL), three-pathfinding  
+- **UI:** React 19, Tailwind CSS 4, React Flow, Zustand  
+- **Local LLM:** Ollama HTTP API  
+- **Local images:** ComfyUI prompt / history / view API  
+- **Optional cloud:** `@google/genai` (music/video), OpenAI proxy in Vite  
+
+---
+
+## Project layout (high level)
+
+```
+src/
+  core/agent/          # AgentBrain, tools, prompts
+  core/llm/            # Providers (Ollama, ComfyUI, Gemini, OpenAI)
+  data/agents.ts       # Team definitions
+  integration/store/   # Zustand: core, team, UI
+  interface/           # React overlays, modals, configurator
+  simulation/          # 3D scene, characters, AgentSimulation
+public/models/         # office.glb, character.glb, …
+```
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
+
+---
 
 ## License & IP
 
-This project follows a dual-licensing model:
+Dual licensing (from upstream):
 
-- **Source Code (MIT):** All logic, shaders, and UI code are free to use, modify, and distribute.
-- **3D Models & Assets (CC BY-NC 4.0):** The custom 3D office and character models are Copyright © 2026 **Arturo Paracuellos ([unboring.net](https://unboring.net))**. They are free for personal and educational use but _cannot_ be used for commercial purposes without permission.
+- **Source code (MIT):** logic, shaders, UI  
+- **3D models & assets (CC BY-NC 4.0):** office/character models © Arturo Paracuellos ([unboring.net](https://unboring.net)) — personal/educational use; commercial use requires permission  
 
-Developed with ❤️ by [Arturo Paracuellos](https://unboring.net)
+Upstream project by [Arturo Paracuellos](https://unboring.net). Local Ollama + ComfyUI integration is a fork customization.

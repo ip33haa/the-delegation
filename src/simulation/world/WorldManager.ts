@@ -37,6 +37,13 @@ export class WorldManager {
         const mesh = child as THREE.Mesh;
         const name = mesh.name.toLowerCase();
 
+        // Guard against null attrs (WebGPU NodeBuilder crashes on getTypeFromAttribute(null)).
+        for (const attrName of Object.keys(mesh.geometry.attributes)) {
+          if (!mesh.geometry.attributes[attrName]) {
+            mesh.geometry.deleteAttribute(attrName);
+          }
+        }
+
         if (name.includes('navmesh')) {
           this.navMesh.loadFromGeometry(mesh.geometry);
           mesh.visible = false;

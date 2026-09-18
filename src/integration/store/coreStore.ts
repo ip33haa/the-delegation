@@ -30,6 +30,58 @@ export interface Task {
   updatedAt: number
 }
 
+export type ManhwaGenerationStatus = 'idle' | 'generating' | 'ready' | 'error'
+
+export interface ManhwaCharacter {
+  id: string
+  name: string
+  visualDescription: string
+  referencePrompt: string
+  imageContent?: string
+  imageAssetId?: string
+  imageUrl?: string
+  generationStatus: ManhwaGenerationStatus
+  generationError?: string
+  locked: boolean
+}
+
+export interface ManhwaBalloon {
+  speaker: string
+  text: string
+  position: string
+}
+
+export interface ManhwaPanel {
+  number: number
+  visual: string
+  shot: string
+  characterIds: string[]
+  balloons: ManhwaBalloon[]
+  captions: string[]
+  sfx: string[]
+  imagePrompt: string
+  imageContent?: string
+  imageAssetId?: string
+  imageUrl?: string
+  generationStatus: ManhwaGenerationStatus
+  generationError?: string
+}
+
+export interface ManhwaChapterPackage {
+  chapterTitle: string
+  premise: string
+  endHook: string
+  characters: ManhwaCharacter[]
+  panels: ManhwaPanel[]
+}
+
+export interface ActiveOperation {
+  agentIndex: number
+  stage: 'thinking' | 'generating_prompt' | 'processing_action' | 'generating_image' | 'saving' | 'error'
+  label: string
+  startedAt: number
+}
+
 export interface ActionLogEntry {
   id: string
   timestamp: number
@@ -79,12 +131,18 @@ interface CoreState {
   agentEstimatedCost: Record<number, number>
   finalAssetType: 'text' | 'image' | 'audio' | 'video'
   finalAssetContent: string | null
+  finalAssetId: string | null
+  finalAssetUrl: string | null
   isGeneratingAsset: boolean
+  assetGenerationError: string | null
   
   // ── Output Review ────────────────────────────────────────────
   isReviewingOutput: boolean
   pendingOutputPrompt: string
   pendingOutputParams: any
+  manhwaProject: ManhwaChapterPackage | null
+  manhwaContinuityContext: string
+  activeOperation: ActiveOperation | null
 
   // ── Tasks ────────────────────────────────────────────────────
   tasks: Task[]
@@ -115,10 +173,18 @@ interface CoreState {
   startProject: (brief: string) => void;
   setFinalOutput: (output: string) => void;
   setFinalAsset: (type: 'image' | 'audio' | 'video', content: string) => void;
+  setFinalAssetRecord: (assetId: string, assetUrl: string) => void;
+  setFinalAssetType: (type: 'text' | 'image' | 'audio' | 'video') => void;
   setIsGeneratingAsset: (isGenerating: boolean) => void;
+  setAssetGenerationError: (error: string | null) => void;
   setReviewingOutput: (val: boolean) => void;
   setPendingOutputPrompt: (prompt: string) => void;
   setPendingOutputParams: (params: any) => void;
+  setManhwaProject: (project: ManhwaChapterPackage | null) => void;
+  setManhwaContinuityContext: (context: string) => void;
+  setActiveOperation: (operation: Omit<ActiveOperation, 'startedAt'> | null) => void;
+  updateManhwaCharacter: (characterId: string, patch: Partial<ManhwaCharacter>) => void;
+  updateManhwaPanel: (panelNumber: number, patch: Partial<ManhwaPanel>) => void;
 
   // ── Actions — Tasks ───────────────────────────────────────────
   addTask: (task: Omit<Task, 'id' | 'revisions' | 'createdAt' | 'updatedAt'>) => Task;
@@ -168,10 +234,16 @@ export const useCoreStore = create<CoreState>()(
       agentEstimatedCost: {},
       finalAssetType: 'text',
       finalAssetContent: null,
+      finalAssetId: null,
+      finalAssetUrl: null,
       isGeneratingAsset: false,
+      assetGenerationError: null,
       isReviewingOutput: false,
       pendingOutputPrompt: '',
       pendingOutputParams: {},
+      manhwaProject: null,
+      manhwaContinuityContext: '',
+      activeOperation: null,
       tasks: [],
       actionLog: [],
       debugLog: [],
@@ -204,10 +276,16 @@ export const useCoreStore = create<CoreState>()(
         agentEstimatedCost: {},
         finalAssetType: 'text',
         finalAssetContent: null,
+        finalAssetId: null,
+        finalAssetUrl: null,
         isGeneratingAsset: false,
+        assetGenerationError: null,
         isReviewingOutput: false,
         pendingOutputPrompt: '',
         pendingOutputParams: {},
+        manhwaProject: null,
+        manhwaContinuityContext: '',
+        activeOperation: null,
         referenceImages: [],
       }),
 
@@ -220,13 +298,60 @@ export const useCoreStore = create<CoreState>()(
       })),
       clearReferenceImages: () => set({ referenceImages: [] }),
       setPhase: (phase) => set({ phase }),
-      startProject: (brief) => set({ userBrief: brief, phase: 'working', finalAssetType: 'text', finalAssetContent: null }),
+      startProject: (brief) => set({
+        userBrief: brief,
+        phase: 'working',
+        finalAssetType: 'text',
+        finalAssetContent: null,
+        finalAssetId: null,
+        finalAssetUrl: null,
+        manhwaProject: null,
+        manhwaContinuityContext: '',
+        activeOperation: null,
+      }),
       setFinalOutput: (output) => set({ finalOutput: output }),
-      setFinalAsset: (type, content) => set({ finalAssetType: type, finalAssetContent: content, isGeneratingAsset: false }),
+      setFinalAsset: (type, content) => set({
+        finalAssetType: type,
+        finalAssetContent: content,
+        finalAssetId: null,
+        finalAssetUrl: null,
+        isGeneratingAsset: false,
+        assetGenerationError: null,
+      }),
+      setFinalAssetRecord: (finalAssetId, finalAssetUrl) => set({ finalAssetId, finalAssetUrl }),
+      setFinalAssetType: (type) => set({ finalAssetType: type }),
       setIsGeneratingAsset: (isGenerating) => set({ isGeneratingAsset: isGenerating }),
+      setAssetGenerationError: (error) => set({ assetGenerationError: error }),
       setReviewingOutput: (val) => set({ isReviewingOutput: val }),
       setPendingOutputPrompt: (prompt) => set({ pendingOutputPrompt: prompt }),
       setPendingOutputParams: (params) => set({ pendingOutputParams: params }),
+      setManhwaProject: (manhwaProject) => set({ manhwaProject }),
+      setManhwaContinuityContext: (manhwaContinuityContext) => set({ manhwaContinuityContext }),
+      setActiveOperation: (operation) => set({
+        activeOperation: operation ? { ...operation, startedAt: Date.now() } : null,
+      }),
+      updateManhwaCharacter: (characterId, patch) =>
+        set((s) => ({
+          manhwaProject: s.manhwaProject
+            ? {
+                ...s.manhwaProject,
+                characters: s.manhwaProject.characters.map((character) =>
+                  character.id === characterId ? { ...character, ...patch, id: character.id } : character
+                ),
+              }
+            : null,
+        })),
+      updateManhwaPanel: (panelNumber, patch) =>
+        set((s) => ({
+          manhwaProject: s.manhwaProject
+            ? {
+                ...s.manhwaProject,
+                panels: s.manhwaProject.panels.map((panel) =>
+                  panel.number === panelNumber ? { ...panel, ...patch, number: panel.number } : panel
+                ),
+              }
+            : null,
+        })),
 
       addTask: (task) => {
         const newTask: Task = {
@@ -475,15 +600,61 @@ export const useCoreStore = create<CoreState>()(
       })),
     }),
     {
-      name: 'core-storage',
-      storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({}),
+      name: 'delegation-project',
+      storage: createJSONStorage(() => sessionStorage),
+      partialize: (state) => ({
+        userBrief: state.userBrief,
+        phase: state.phase,
+        tasks: state.tasks,
+        finalOutput: state.finalOutput,
+        finalAssetType: state.finalAssetType,
+        // Skip huge image blobs — keep prompt text in finalOutput instead.
+        finalAssetContent:
+          state.finalAssetType === 'image' || (state.finalAssetContent?.length ?? 0) > 400_000
+            ? null
+            : state.finalAssetContent,
+        finalAssetId: state.finalAssetId,
+        finalAssetUrl: state.finalAssetUrl,
+        isGeneratingAsset: state.isGeneratingAsset,
+        assetGenerationError: state.assetGenerationError,
+        isReviewingOutput: state.isReviewingOutput,
+        pendingOutputPrompt: state.pendingOutputPrompt,
+        pendingOutputParams: state.pendingOutputParams,
+        manhwaProject: state.manhwaProject
+          ? {
+              ...state.manhwaProject,
+              characters: state.manhwaProject.characters.map((character) => ({
+                ...character,
+                imageContent: undefined,
+                locked: false,
+                generationStatus: 'idle' as const,
+                generationError: undefined,
+              })),
+              panels: state.manhwaProject.panels.map((panel) => ({
+                ...panel,
+                imageContent: undefined,
+                generationStatus: 'idle' as const,
+                generationError: undefined,
+              })),
+            }
+          : null,
+        manhwaContinuityContext: state.manhwaContinuityContext,
+        isFinalOutputOpen: state.isFinalOutputOpen,
+        agentHistories: state.agentHistories,
+        actionLog: state.actionLog.slice(-80),
+      }),
     }
   )
 )
 
-// Sync resetProject whenever the active team changes
+let teamStoreHydrated = false;
+useTeamStore.persist.onFinishHydration(() => {
+  teamStoreHydrated = true;
+});
+
+// Reset project only when the user actually switches teams (not on store rehydrate).
 useTeamStore.subscribe((state, prevState) => {
+  if (!teamStoreHydrated) return;
   if (state.selectedAgentSetId !== prevState.selectedAgentSetId) {
     useCoreStore.getState().resetProject();
   }

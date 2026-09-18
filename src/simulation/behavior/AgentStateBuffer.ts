@@ -37,8 +37,9 @@ export class AgentStateBuffer {
     for (let i = 0; i < count; i++) {
       this.array[i * 8 + 6] = 1.0;
     }
-    this.attribute = new THREE.StorageInstancedBufferAttribute(this.array, 8);
-    this.storageNode = storage(this.attribute, 'vec4', count * 2);
+    this.attribute = new THREE.StorageInstancedBufferAttribute(this.array, 4);
+    // PBO required so WebGL2 fallback can sample this from vertex/fragment shaders.
+    this.storageNode = storage(this.attribute, 'vec4', count * 2).setPBO(true);
   }
 
   // ── Mode/State ───────────────────────────────────────────────

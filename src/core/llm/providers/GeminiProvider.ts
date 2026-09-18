@@ -1,7 +1,8 @@
 import { FunctionDeclaration, GoogleGenAI, Tool, Type } from '@google/genai';
 import { LLMMessage, LLMProvider, LLMResponse, LLMToolCall, LLMToolDefinition } from '../types';
-import { DEFAULT_MODELS } from '../constants';
+import { DEFAULT_MODELS, GEMINI_IMAGE_MODEL, GEMINI_IMAGE_MODEL_FALLBACK } from '../constants';
 import { calculateTokensForCost } from '../pricing';
+import { inferAspectRatio } from './ComfyUIImageProvider';
 
 
 export class GeminiProvider implements LLMProvider {
@@ -104,64 +105,97 @@ export class GeminiProvider implements LLMProvider {
 
   async generateImage(
     prompt: string,
-    modelName: string = DEFAULT_MODELS.image,
+    modelName: string = GEMINI_IMAGE_MODEL,
     onProgress?: (msg: string) => void,
     options: { aspectRatio?: string; imageSize?: string } = {},
     images?: string[]
   ): Promise<{ data: string; usage?: any }> {
-    if (onProgress) onProgress("Generating image...");
+    const aspectRatio = options.aspectRatio || inferAspectRatio(prompt);
+    const imageSize = mapGeminiImageSize(options.imageSize);
+    const modelsToTry = [
+      modelName,
+      ...(modelName !== GEMINI_IMAGE_MODEL_FALLBACK ? [GEMINI_IMAGE_MODEL_FALLBACK] : []),
+    ];
 
-    const config = {
-      responseModalities: ["IMAGE", "TEXT"],
-      imageConfig: {
-        aspectRatio: options.aspectRatio || '16:9',
-        imageSize: options.imageSize || '1K', // Default 1K, options: '512', '1K', '2K', '4K'
-      }
-    };
+    onProgress?.(`Generating with Nano Banana (${modelName})…`);
 
-    const contents: any[] = [{ text: prompt }];
-
-    if (images && images.length > 0) {
-      for (const img of images) {
-        const base64Match = img.match(/^data:(image\/[a-z]+);base64,(.+)$/);
-        if (base64Match) {
-          contents.push({
-            inlineData: {
-              mimeType: base64Match[1],
-              data: base64Match[2]
-            }
-          });
+    const parts: any[] = [];
+    if (images?.length) {
+      for (let i = 0; i < images.length; i++) {
+        const inline = this.parseInlineImage(images[i]);
+        if (inline) {
+          parts.push({ inlineData: inline });
         }
       }
+      parts.push({
+        text: `Reference images attached (${images.length}). Match likeness and style from references where the prompt asks. Prompt: ${prompt}`,
+      });
+    } else {
+      parts.push({ text: prompt });
     }
 
-    const result = await this.client.models.generateContent({
-      model: modelName,
-      contents,
-      config: config as any
-    });
+    let lastError = 'Gemini image generation failed';
+    for (const model of modelsToTry) {
+      try {
+        onProgress?.(`Calling ${model} (${aspectRatio}, ${imageSize})…`);
+        const result = await this.client.models.generateContent({
+          model,
+          contents: [{ role: 'user', parts }],
+          config: {
+            responseModalities: ['TEXT', 'IMAGE'],
+            imageConfig: {
+              aspectRatio,
+              imageSize,
+            },
+          },
+        });
 
-    const candidate = result.candidates?.[0];
-    const parts = candidate?.content?.parts || [];
-    let base64Data: string | undefined;
+        const base64 = this.extractFinalImageBase64(result);
+        if (!base64) {
+          throw new Error('Gemini returned no image data');
+        }
 
-    for (const part of parts) {
-      if (part.inlineData) {
-        base64Data = part.inlineData.data;
+        const usage = result.usageMetadata
+          ? {
+              promptTokens: result.usageMetadata.promptTokenCount || 0,
+              completionTokens: result.usageMetadata.candidatesTokenCount || 0,
+              totalTokens: result.usageMetadata.totalTokenCount || 0,
+              count: 1,
+            }
+          : { count: 1 };
+
+        return { data: base64, usage };
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        const retry =
+          /not found|404|does not exist|invalid model|unsupported/i.test(lastError) &&
+          model !== modelsToTry[modelsToTry.length - 1];
+        if (!retry) break;
+        onProgress?.(`${model} unavailable, trying fallback…`);
       }
     }
 
-    const imageTokens = calculateTokensForCost(modelName, 1);
+    throw new Error(lastError);
+  }
 
-    return {
-      data: base64Data || '',
-      usage: {
-        promptTokens: result.usageMetadata?.promptTokenCount || 0,
-        completionTokens: (result.usageMetadata?.candidatesTokenCount || 0) + imageTokens,
-        totalTokens: (result.usageMetadata?.totalTokenCount || 0) + imageTokens,
-        count: 1
-      }
-    };
+  private parseInlineImage(img: string): { mimeType: string; data: string } | null {
+    const m = img.match(/^data:(image\/[a-z+]+);base64,(.+)$/i);
+    if (m) return { mimeType: m[1], data: m[2] };
+    if (img.length > 100) return { mimeType: 'image/jpeg', data: img };
+    return null;
+  }
+
+  /** Gemini 3 may return draft images first — take the last non-thought image part. */
+  private extractFinalImageBase64(result: any): string | undefined {
+    const parts = result.candidates?.[0]?.content?.parts || [];
+    const imageParts = parts.filter(
+      (p: any) =>
+        !p.thought &&
+        p.inlineData?.data &&
+        String(p.inlineData.mimeType || '').startsWith('image/')
+    );
+    const last = imageParts[imageParts.length - 1];
+    return last?.inlineData?.data;
   }
 
   async generateAudio(
@@ -443,4 +477,12 @@ export class GeminiProvider implements LLMProvider {
 
     return result;
   }
+}
+
+function mapGeminiImageSize(imageSize?: string): string {
+  const s = (imageSize || '1024').toLowerCase();
+  if (s === '512' || s === '0.5k') return '512';
+  if (s === '2k' || s === '2048') return '2K';
+  if (s === '4k' || s === '4096') return '4K';
+  return '1K';
 }

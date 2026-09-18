@@ -1,4 +1,4 @@
-import { Send } from 'lucide-react';
+import { ClipboardPlus, Send, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -11,6 +11,7 @@ import { useSceneManager } from '../simulation/SceneContext';
 import { Avatar } from './components/Avatar';
 import { AuditModal } from './AuditModal';
 import { FileSearch } from 'lucide-react';
+import { scheduleProjectSave } from '../core/persistence/coordinator';
 
 const ChatPanel: React.FC = () => {
   const {
@@ -26,6 +27,9 @@ const ChatPanel: React.FC = () => {
   const selectedAgentSetId = activeTeam.id;
 
   const [input, setInput] = useState('');
+  const [isAssigning, setIsAssigning] = useState(false);
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskDetails, setTaskDetails] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const typingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const stopTypingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -96,6 +100,40 @@ const ChatPanel: React.FC = () => {
     const text = input;
     setInput('');
     await scene?.sendMessage(text);
+  };
+
+  const assignManualTask = () => {
+    if (!agent || !taskTitle.trim() || !taskDetails.trim()) return;
+    const store = useCoreStore.getState();
+    if (store.phase !== 'working') {
+      useCoreStore.setState({
+        phase: 'working',
+        userBrief: store.userBrief || taskDetails.trim(),
+        activeOperation: null,
+      });
+    }
+    const task = useCoreStore.getState().addTask({
+      title: taskTitle.trim(),
+      description: taskDetails.trim(),
+      assignedAgentId: agent.index,
+      status: 'scheduled',
+      parentTaskId: 'manual',
+      requiresUserApproval: false,
+    });
+    useCoreStore.setState((state) => ({
+      agentHistories: {
+        ...state.agentHistories,
+        [agent.index]: [
+          ...(state.agentHistories[agent.index] || []),
+          { role: 'user', content: `Manual task: **${task.title}**\n\n${task.description}` },
+          { role: 'assistant', content: `Understood. I’ll handle **${task.title}** and post the result to the board.` },
+        ],
+      },
+    }));
+    setTaskTitle('');
+    setTaskDetails('');
+    setIsAssigning(false);
+    scheduleProjectSave(true);
   };
 
   if (!isChatting || !agent) {
@@ -208,7 +246,48 @@ const ChatPanel: React.FC = () => {
 
       {/* Input */}
       <div className="p-2 border-t border-zinc-50">
+        {isAssigning && agent.index !== activeTeam.leadAgent.index && (
+          <div className="mb-2 rounded-2xl border border-violet-200 bg-violet-50 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[9px] font-black uppercase tracking-wider text-violet-800">
+                Assign to {agent.name}
+              </span>
+              <button onClick={() => setIsAssigning(false)} className="text-violet-500">
+                <X size={14} />
+              </button>
+            </div>
+            <input
+              value={taskTitle}
+              onChange={(event) => setTaskTitle(event.target.value)}
+              placeholder="Task title"
+              className="mb-2 w-full rounded-xl border border-violet-200 bg-white px-3 py-2 text-xs outline-none"
+            />
+            <textarea
+              value={taskDetails}
+              onChange={(event) => setTaskDetails(event.target.value)}
+              placeholder="Describe the result you need"
+              rows={3}
+              className="w-full resize-none rounded-xl border border-violet-200 bg-white px-3 py-2 text-xs outline-none"
+            />
+            <button
+              onClick={assignManualTask}
+              disabled={!taskTitle.trim() || !taskDetails.trim()}
+              className="mt-2 w-full rounded-xl bg-violet-600 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-white disabled:opacity-40"
+            >
+              Add to task board
+            </button>
+          </div>
+        )}
         <div className="relative flex items-center gap-2">
+          {agent.index !== activeTeam.leadAgent.index && (
+            <button
+              onClick={() => setIsAssigning((value) => !value)}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-violet-200 bg-violet-50 text-violet-700 transition hover:bg-violet-100"
+              title={`Assign a task to ${agent.name}`}
+            >
+              <ClipboardPlus size={16} />
+            </button>
+          )}
           <div className="flex-1 relative">
             <textarea
               value={input}

@@ -14,7 +14,7 @@ import { AgentSimulation } from './core/AgentSimulation';
 import { useCoreStore } from '../integration/store/coreStore';
 import { getActiveAgentSet, useTeamStore } from '../integration/store/teamStore';
 import { useUiStore } from '../integration/store/uiStore';
-import { AgentBehavior, ChatMessage } from '../types';
+import { AgentBehavior } from '../types';
 import { BUBBLE_Y_OFFSET } from './constants';
 
 /**
@@ -44,6 +44,8 @@ export class SceneManager {
   private isDisposed = false;
   private container: HTMLElement;
   private resizeObserver: ResizeObserver;
+  private lastPublishedScreenPositions: Record<number, { x: number; y: number }> = {};
+  private lastScreenPositionPublish = 0;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -59,6 +61,7 @@ export class SceneManager {
     this.resizeObserver.observe(container);
 
     const activeSet = getActiveAgentSet();
+    this.lastAgentSetId = activeSet.id;
     this.simulation = new AgentSimulation(activeSet);
     this.setCoreHandler((idx, text) => this.simulation!.handleUserMessage(idx, text));
     
@@ -101,6 +104,8 @@ export class SceneManager {
     await this.engine.init();
     if (this.isDisposed) return;
 
+    this.characterManager.setUseWebGPU(this.engine.isWebGPU);
+
     await this.worldManager.load();
     await this.characterManager.load();
     if (this.isDisposed) return;
@@ -121,7 +126,17 @@ export class SceneManager {
     new InputManager(
       this.engine.renderer.domElement, this.stage.camera,
       () => this.controller!.getCPUPositions(), () => this.controller!.getCount(),
-      (idx) => { if (useUiStore.getState().isChatting) useUiStore.getState().setChatting(false); this.selectedIndex = idx !== activeSet.user.index ? idx : null; useUiStore.getState().setSelectedNpc(this.selectedIndex); },
+      (idx) => {
+        const ui = useUiStore.getState();
+        if (ui.isChatting) ui.setChatting(false);
+        this.selectedIndex = idx !== activeSet.user.index ? idx : null;
+        ui.setSelectedNpc(this.selectedIndex);
+        if (this.selectedIndex !== null) {
+          ui.setAgentCheckIn(this.selectedIndex, null);
+          ui.setInspectorTab('chat');
+          ui.setChatting(true);
+        }
+      },
       (x, z) => this.driverManager?.getPlayerDriver().onFloorClick(x, z),
       (idx, pos) => useUiStore.getState().setHoveredNpc(idx, pos),
       () => this.poiManager.getAllPois(),
@@ -213,6 +228,7 @@ export class SceneManager {
   }
 
   public startChat(npcIndex: number): void {
+    useUiStore.getState().setAgentCheckIn(npcIndex, null);
     useUiStore.getState().setChatting(true);
   }
 
@@ -311,8 +327,45 @@ export class SceneManager {
     const agent = getAllAgents(set).find(a => a.index === idx);
     if (!agent) return;
     useUiStore.setState({ isThinking: true });
-    const msg: ChatMessage = { role: 'assistant', text: `Hello. I am ${agent.name}. How can I assist you?`, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
-    useUiStore.setState({ chatMessages: [msg], isThinking: false });
+    const core = useCoreStore.getState();
+    const assigned = core.tasks.filter((task) => Number(task.assignedAgentId) === idx);
+    const review = assigned.find((task) => task.status === 'on_hold');
+    const active = assigned.find((task) => task.status === 'in_progress');
+    const queued = assigned.find((task) => task.status === 'scheduled');
+    const completed = [...assigned].reverse().find((task) => task.status === 'done');
+    let content: string;
+    if (review) {
+      content = `I finished **${review.title}**. Could you review it and tell me what you would change?`;
+    } else if (active) {
+      content = `I’m working on **${active.title}** right now. I’ll bring you the result as soon as it is ready.`;
+    } else if (queued) {
+      content = `My next task is **${queued.title}**. Is there a preference or detail you want me to keep in mind?`;
+    } else if (completed) {
+      content = `I completed **${completed.title}**. Does it match what you had in mind, or should I adjust anything?`;
+    } else if (idx === set.leadAgent.index && core.phase === 'done') {
+      content = 'The team has finished the project. Would you like to review the result together or change anything?';
+    } else {
+      content = `Hi, I’m ${agent.name}. What should we focus on next?`;
+    }
+    useCoreStore.setState((state) => {
+      const history = state.agentHistories[idx] || [];
+      const lastVisible = [...history].reverse().find((message) => !message.metadata?.internal);
+      if (lastVisible?.role === 'assistant' && lastVisible.content === content) return state;
+      return {
+        agentHistories: {
+          ...state.agentHistories,
+          [idx]: [
+            ...history,
+            {
+              role: 'assistant',
+              content,
+              metadata: review ? { reviewTaskId: review.id } : undefined,
+            },
+          ],
+        },
+      };
+    });
+    useUiStore.setState({ isThinking: false });
   }
 
   private onResize() { 
@@ -333,24 +386,58 @@ export class SceneManager {
     const player = getActiveAgentSet().user.index;
     this.stage.setFollowTarget(this.controller?.getCPUPosition(this.selectedIndex ?? player) ?? null);
     const { selectedNpcIndex, setSelectedPosition, selectedPosition } = useUiStore.getState();
-    const npcScreenPositions: Record<number, { x: number; y: number }> = {};
-    const rect = this.container.getBoundingClientRect();
-    if (this.controller) {
-      for (let i = 0; i < this.controller.getCount(); i++) {
-        const p = this.controller.getCPUPosition(i);
-        if (p) {
-          const s = p.clone(); s.y += BUBBLE_Y_OFFSET; s.project(this.stage.camera);
-          npcScreenPositions[i] = { x: (s.x * 0.5 + 0.5) * rect.width, y: (s.y * -0.5 + 0.5) * rect.height };
-        }
-      }
-      useUiStore.setState({ npcScreenPositions });
-    }
+    const npcScreenPositions = this.collectScreenPositions();
+    this.publishScreenPositions(npcScreenPositions);
     if (selectedNpcIndex !== null && npcScreenPositions[selectedNpcIndex]) {
       const p = npcScreenPositions[selectedNpcIndex];
       if (Math.abs(p.x - (selectedPosition?.x ?? 0)) > 0.5 || Math.abs(p.y - (selectedPosition?.y ?? 0)) > 0.5) setSelectedPosition(p);
     } else if (selectedPosition !== null) setSelectedPosition(null);
     this.stage.setChatMode(useUiStore.getState().isChatting, this.controller?.getAgentState(player) === AgentBehavior.GOTO);
     this.engine.render(this.stage.scene, this.stage.camera);
+  }
+
+  private collectScreenPositions(): Record<number, { x: number; y: number }> {
+    const npcScreenPositions: Record<number, { x: number; y: number }> = {};
+    if (!this.controller) return npcScreenPositions;
+    const rect = this.container.getBoundingClientRect();
+    for (let i = 0; i < this.controller.getCount(); i++) {
+      const p = this.controller.getCPUPosition(i);
+      if (!p) continue;
+      const s = p.clone();
+      s.y += BUBBLE_Y_OFFSET;
+      s.project(this.stage.camera);
+      npcScreenPositions[i] = {
+        x: (s.x * 0.5 + 0.5) * rect.width,
+        y: (s.y * -0.5 + 0.5) * rect.height,
+      };
+    }
+    return npcScreenPositions;
+  }
+
+  private publishScreenPositions(next: Record<number, { x: number; y: number }>) {
+    const now = performance.now();
+    if (now - this.lastScreenPositionPublish < 120) return;
+
+    const prev = this.lastPublishedScreenPositions;
+    const prevKeys = Object.keys(prev);
+    const nextKeys = Object.keys(next);
+    let changed = prevKeys.length !== nextKeys.length;
+    if (!changed) {
+      for (const key of nextKeys) {
+        const index = Number(key);
+        const before = prev[index];
+        const after = next[index];
+        if (!before || Math.abs(before.x - after.x) > 2 || Math.abs(before.y - after.y) > 2) {
+          changed = true;
+          break;
+        }
+      }
+    }
+    if (!changed) return;
+
+    this.lastPublishedScreenPositions = next;
+    this.lastScreenPositionPublish = now;
+    useUiStore.setState({ npcScreenPositions: next });
   }
 
   private updateTransparency(pos: Float32Array, delta: number) {
